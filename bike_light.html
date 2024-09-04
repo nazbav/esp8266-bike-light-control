@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bike Light Control</title>
+  <style>
+    body {
+        background-color: #121212;
+        color: #ffffff;
+        font-family: Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+    }
+    .container {
+        width: 100%;
+        max-width: 400px;
+        padding: 20px;
+        box-sizing: border-box;
+    }
+    h1 {
+        text-align: center;
+        font-size: 24px;
+        margin-bottom: 20px;
+    }
+    .button {
+        width: 100%;
+        padding: 1rem 2rem;
+        margin: 10px 0;
+        font-size: 2rem;
+        background-color: #333333;
+        color: #ffffff;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        text-align: center;
+        transition: background-color 0.3s ease;
+    }
+    .button:hover {
+        background-color: #444444;
+    }
+    .button-small {
+        width: 48%;
+        padding: 15px;
+        font-size: 18px;
+    }
+    .button-left {
+        float: left;
+    }
+    .button-right {
+        float: right;
+    }
+    select, #device-select {
+        width: 100%;
+        padding: 15px;
+        font-size: 18px;
+        background-color: #333333;
+        color: #ffffff;
+        border: none;
+        border-radius: 5px;
+        margin: 10px 0;
+    }
+    .data-display {
+        margin: 10px 0;
+        font-size: 18px;
+        color: #ffffff;
+    }
+    .calibration-controls {
+        margin: 20px 0;
+    }
+    .calibration-controls button {
+        margin: 5px;
+    }
+    .button-active {
+        background-color: #4CAF50;
+        color: #ffffff;
+    }
+    .button-inactive {
+        background-color: #f44336;
+        color: #ffffff;
+    }
+    .button-error {
+        background-color: #f44300;
+        color: #ffffff;
+    }
+    textarea {
+        width: 100%;
+        height: 100px;
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #333333;
+        color: #ffffff;
+        border: none;
+        border-radius: 5px;
+        font-family: monospace;
+        overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+
+<audio id="leftTurnSound" src="l.wav" preload="auto"></audio>
+<audio id="rightTurnSound" src="r.wav" preload="auto"></audio>
+
+<div class="container">
+    <h1>Bike Light Control</h1>
+    <select id="device-select" onchange="updateSelectedDevice()">
+        <option value="">Select Device</option>
+    </select>
+    <button class="button" id="light-button" onclick="toggleSignalMode()">Light</button>
+    <div style="display:flex">
+        <button class="button button-left" onclick="handleTurnSignal('left')"><</button>
+        <button class="button button-right" onclick="handleTurnSignal('right')">></button>
+    </div>
+    <button class="button" onclick="stopSignal()">Stop</button>
+    <select id="signal-mode-select" class="button" onchange="setSignalMode(this.value)">
+        <option value="0">OFF</option>
+        <option value="1">Mode 1</option>
+        <option value="2">Mode 2</option>
+        <option value="3">Mode 3</option>
+        <option value="4">Mode 4</option>
+        <option value="5">Mode 5</option>
+        <option value="6">Mode 6</option>
+        <option value="7">Mode 7</option>
+        <option value="8">Mode 8</option>
+        <option value="9">Mode 9</option>
+        <option value="10">Mode 10</option>
+        <option value="11">Mode 11</option>
+        <option value="12">Mode 12</option>
+        <option value="13">Mode 13</option>
+        <option value="14">Mode 14</option>
+        <option value="15">Mode 15</option>
+        <option value="16">Mode 16</option>
+        <option value="17">Mode 17</option>
+        <option value="18">Mode 18</option>
+        <option value="19">Mode 19</option>
+    </select>
+    <button class="button" onclick="updateFirmware()">Update Firmware</button>
+    <button class="button" onclick="sendRequest('/reboot')">Reboot</button>
+
+  <textarea id="response-output" placeholder="Response will be displayed here..."></textarea>
+
+
+</div>
+
+
+<script>
+    var baseUrl = ''; // IP будет обновлен после выбора устройства
+    var devices = {}; // Хранение данных об устройствах
+    var pingInterval = 20000; // Интервал пинга (20 секунд)
+    var signalTimeout; // Таймер для остановки сигнала
+
+    var leftTurnSound = document.getElementById('leftTurnSound');
+    var rightTurnSound = document.getElementById('rightTurnSound');
+    var currentSound = null; // Ссылка на текущий воспроизводимый звук
+
+    function playTurnSound(sound) {
+        if (currentSound === sound) {
+            // Если уже воспроизводится тот же звук, остановить его
+            stopTurnSound();
+            return;
+        }
+
+        if (currentSound) {
+            // Остановить текущий звук, если есть
+            stopTurnSound();
+        }
+
+        currentSound = sound;
+        currentSound.loop = true; // Зацикливание звука
+        currentSound.play();
+        if (signalTimeout) {
+            clearTimeout(signalTimeout); // Остановить предыдущий таймер
+        }
+        // Установить таймер для остановки звука через 30 секунд
+        signalTimeout = setTimeout(function() {
+            stopTurnSound();
+        }, 10000); // 10 секунд
+    }
+
+    function stopTurnSound() {
+        if (currentSound) {
+            currentSound.pause();
+            currentSound.currentTime = 0;
+            currentSound = null;
+        }
+    }
+
+    let last_turn = '';
+    let l_status = 0;
+    let r_status = 0;
+
+function handleTurnSignal(direction) {
+    if (direction === 'left') {
+        // Отправляем запрос на включение левого поворотника
+        sendRequest('/leftTurn', function(response) {
+            var l_status = response.leftTurnSignal;
+            var r_status = response.rightTurnSignal;
+
+            if (r_status) {
+                // Если правый поворотник включен, выключаем его
+                sendRequest('/rightTurn', function() {
+                    // Ничего не делаем после выключения правого поворотника
+                });
+            }
+
+            if (l_status) {
+                // Если левый поворотник включен, запускаем звук
+                playTurnSound(leftTurnSound);
+            } else {
+                // Если левый поворотник выключен, останавливаем звук
+                stopTurnSound();
+            }
+        });
+    } else if (direction === 'right') {
+        // Отправляем запрос на включение правого поворотника
+        sendRequest('/rightTurn', function(response) {
+            var l_status = response.leftTurnSignal;
+            var r_status = response.rightTurnSignal;
+
+            if (l_status) {
+                // Если левый поворотник включен, выключаем его
+                sendRequest('/leftTurn', function() {
+                    // Ничего не делаем после выключения левого поворотника
+                });
+            }
+
+            if (r_status) {
+                // Если правый поворотник включен, запускаем звук
+                playTurnSound(rightTurnSound);
+            } else {
+                // Если правый поворотник выключен, останавливаем звук
+                stopTurnSound();
+            }
+        });
+    }
+}
+
+
+    function pingDevice(device, onSuccess) {
+        var xhr = new XMLHttpRequest();
+        xhr.timeout = 5000; // Устанавливаем таймаут для запроса
+        xhr.open('GET', 'http://' + device.ip, true);
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+                var button = document.getElementById('light-button');
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    // Подсвечиваем кнопку зелёным для активного устройства
+                    button.classList.add('button-active');
+                    button.classList.remove('button-inactive', 'button-error');
+                    if (onSuccess) onSuccess();
+                } else {
+                    // Подсвечиваем кнопку красным для ошибки
+                    button.classList.add('button-error');
+                    button.classList.remove('button-active', 'button-inactive');
+                }
+            }
+        };
+        xhr.onerror = function() {
+            // Подсвечиваем кнопку красным в случае ошибки запроса
+            var button = document.getElementById('light-button');
+            if (button) {
+                button.classList.add('button-error');
+                button.classList.remove('button-active', 'button-inactive');
+            }
+        };
+        xhr.send();
+    }
+
+    function updateDeviceStatuses() {
+        var select = document.getElementById('device-select');
+        if (!select) return;
+
+        var selectedDeviceId = select.value;
+        if (selectedDeviceId) {
+            var device = devices[selectedDeviceId];
+            pingDevice(device);
+        } else {
+            var deviceIds = Object.keys(devices);
+            var pendingPings = deviceIds.length;
+            var foundActiveDevice = false;
+
+            deviceIds.forEach(function(id) {
+                var device = devices[id];
+                pingDevice(device, function() {
+                    if (!foundActiveDevice) {
+                        // Устанавливаем активное устройство и обновляем выбор
+                        baseUrl = 'http://' + device.ip;
+                        select.value = id; // Устанавливаем выбранное устройство
+                        updateSelectedDevice();
+                        foundActiveDevice = true;
+                    }
+                    pendingPings--;
+                    if (pendingPings === 0 && !foundActiveDevice) {
+                        // Если ни одно устройство не активно, сбрасываем выбор
+                        select.value = '';
+                        baseUrl = '';
+                    }
+                });
+            });
+        }
+    }
+
+    function loadDeviceData() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'http://wifi.n4v.ru/device_data.json', true);
+        xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                devices = JSON.parse(xhr.responseText);
+                populateDeviceSelect(devices);
+                updateDeviceStatuses(); // Проверяем доступность устройств
+            }
+        };
+        xhr.send();
+    }
+
+    function populateDeviceSelect(devices) {
+        var select = document.getElementById('device-select');
+        select.innerHTML = '<option value="">Select Device</option>'; // Очищаем предыдущие опции
+
+        for (var id in devices) {
+            if (devices.hasOwnProperty(id)) {
+                var device = devices[id];
+                var option = document.createElement('option');
+                option.value = id;
+                option.textContent = device.ssid || 'Unknown Device';
+                select.appendChild(option);
+            }
+        }
+    }
+
+    function updateSelectedDevice() {
+        var select = document.getElementById('device-select');
+        var selectedDeviceId = select.value;
+        if (selectedDeviceId) {
+            var device = devices[selectedDeviceId];
+            if (device) {
+                baseUrl = 'http://' + device.ip;
+                console.log('Selected device IP:', baseUrl);
+                pingDevice(device); // Пингуем выбранное устройство
+            }
+        } else {
+            baseUrl = '';
+        }
+    }
+
+    setInterval(updateDeviceStatuses, pingInterval);
+
+function sendRequest(endpoint, callback = (log)=>{console.log(log);}) {
+    if (!baseUrl) {
+        alert('Please select a device first.');
+        return;
+    }
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', baseUrl + endpoint, true);
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === XMLHttpRequest.DONE) {
+            var responseOutput = document.getElementById('response-output');
+            responseOutput.value = xhr.responseText;
+            
+            if (xhr.status >= 200 && xhr.status < 300) {
+                if (callback) {
+                    callback(xhr.responseText); // Выполнение колбэка с ответом сервера
+                }
+            } else {
+                console.error('Request failed with status:', xhr.status);
+            }
+        }
+    };
+    xhr.send();
+}
+
+
+    function stopSignal() {
+        sendRequest('/stopSignal');
+        stopTurnSound(); // Остановить звук при остановке сигнала
+    }
+
+    function toggleSignalMode() {
+        var selectElement = document.getElementById('signal-mode-select');
+        var currentMode = parseInt(selectElement.value, 10);
+        if (isNaN(currentMode)) {
+            currentMode = 0; // Default to mode 0 if currentMode is NaN
+        }
+        var newMode = (currentMode + 1) % 20; // Cycle through the modes
+        selectElement.value = newMode;
+        setSignalMode(newMode);
+    }
+
+    function setSignalMode(value) {
+        sendRequest('/setSignalMode?mode=' + value);
+    }
+
+    function updateFirmware() {
+        if (!baseUrl) {
+            alert('Please select a device first.');
+            return;
+        }
+        sendRequest('/startUpdate');
+        stopSignal();
+        sendRequest('/leftTurn');
+        sendRequest('/rightTurn');
+        window.setTimeout(function() { window.location.href = baseUrl + "/update"; }, 2000);
+    }
+
+    function handleDeviceOrientation(event) {
+        var alpha = event.alpha; // вращение вокруг оси z
+        var beta = event.beta;   // наклон вперед/назад (по оси x)
+        var gamma = event.gamma; // наклон влево/вправо (по оси y)
+
+        // Настройка пороговых значений для активации поворотников
+        var tiltThreshold = 50;
+
+        if (gamma > tiltThreshold) {
+            // handleTurnSignal('right');
+            // clearTimeout(signalTimeout); // Очистить предыдущий таймер
+        } else if (gamma < -tiltThreshold) {
+            // handleTurnSignal('left');
+            // clearTimeout(signalTimeout); // Очистить предыдущий таймер
+        } else {
+            // clearTimeout(signalTimeout); // Очистить предыдущий таймер
+            signalTimeout = setTimeout(stopSignal, 2000); // Установить новый таймер
+        }
+    }
+
+    window.addEventListener('deviceorientation', handleDeviceOrientation);
+
+    window.onload = function() {
+        loadDeviceData();
+    };
+</script>
+
+</body>
+</html>
