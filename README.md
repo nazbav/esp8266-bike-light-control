@@ -121,30 +121,6 @@ HTML-файл предоставляет интерфейс для управл�
 - **Кнопки поворота**: Кнопки для управления сигналами поворота влево и вправо.
 - **Кнопка "Stop"**: Включает стоп-сигнал.
 
-```html
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bike Light Control</title>
-  <script>
-    function sendRequest(url) {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", url, true);
-        xhr.send();
-    }
-
-    function updateFirmware() {
-        sendRequest('/startUpdate');
-        window.setTimeout(function(){window.location.href = "/update";}, 2000);
-    }
-  </script>
-</head>
-<body>
-    <button class="button" onclick="updateFirmware()">Update Firmware</button>
-    <button class="button" onclick="sendRequest('/reboot')">reboot</button>
-</body>
-</html>
-```
 
 ## PHP скрипт для получения данных (`esp_ip.php`)
 
